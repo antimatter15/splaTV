@@ -965,7 +965,7 @@ async function main() {
         console.log("splat", remaining);
 
         const texdata = new Uint32Array(buffer);
-        console.log(texdata);
+        // console.log(texdata);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, texture);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
