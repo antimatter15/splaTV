@@ -275,6 +275,8 @@ async function initXR() {
     }
   };
 
+  refSpace = await session.requestReferenceSpace("local");
+
   const url = "model.splatv";
   const req = await fetch(url, { mode: "cors", credentials: "omit" });
   if (req.status != 200) throw new Error(req.status + " Unable to load " + req.url);
@@ -290,6 +292,11 @@ async function initXR() {
       for (let chunk of JSON.parse(new TextDecoder("utf-8").decode(buffer))) {
         chunks.push(chunk);
         if (chunk.type === "splat") {
+          console.log(vertexCount);
+
+          document.getElementById("spinner").style.display = "none";
+
+          session.requestAnimationFrame(onXRFrame);
         }
       }
     } else if (chunk.type === "splat") {
@@ -311,18 +318,6 @@ async function initXR() {
     }
   };
   await readChunks(req.body.getReader(), [{ size: 8, type: "magic" }], chunkHandler);
-  console.log(vertexCount);
-  const depthIndex = new Int32Array(vertexCount);
-  for (let i = 0; i < vertexCount; i++) {
-    depthIndex[i] = i;
-  }
-  gl.bindBuffer(gl.ARRAY_BUFFER, indexBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, depthIndex, gl.DYNAMIC_DRAW);
-
-  refSpace = await session.requestReferenceSpace("local");
-  document.getElementById("spinner").style.display = "none";
-
-  session.requestAnimationFrame(onXRFrame);
 
   function onXRFrame(time, frame) {
     let session = frame.session;
