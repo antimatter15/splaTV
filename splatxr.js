@@ -394,7 +394,14 @@ async function readChunks(reader, chunks, handleChunk) {
   if (chunk) handleChunk(chunk, buffer.buffer, 0, chunks);
 }
 
-initXR();
+initXR().catch((err) => {
+  document.getElementById("spinner").style.cursor = "pointer";
+  document.getElementById("spinner").onclick = () => {
+    initXR().catch((err) => {
+      alert(err);
+    });
+  };
+});
 
 function multiply4(a, b) {
   return [
