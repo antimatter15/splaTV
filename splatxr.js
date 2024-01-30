@@ -394,6 +394,12 @@ async function readChunks(reader, chunks, handleChunk) {
   if (chunk) handleChunk(chunk, buffer.buffer, 0, chunks);
 }
 
+document.getElementById("enter").onclick = () => {
+  initXR().catch((err) => {
+    alert(err);
+  });
+};
+
 initXR().catch((err) => {
   document.getElementById("spinner").style.cursor = "pointer";
   document.getElementById("spinner").onclick = () => {
