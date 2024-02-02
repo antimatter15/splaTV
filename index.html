@@ -185,19 +185,25 @@
 			body.nohf #progress, body.nohf .cube-face {
 				background: #ff9d0d;
 			}
+
+			#enter {
+				position: absolute;
+				top: 0;
+				left: 0;
+				right: 0;
+				z-index: 10000;
+				padding: 10px;
+				display: none;
+			}
 		</style>
 	</head>
 	<body>
-		<script>
-			if(location.host.includes('hf.space')) document.body.classList.add('nohf');
-		</script>
 		<div id="info">
 			<p>
 		</p>
 
 			
 		</div>
-
 		<div id="progress"></div>
 
 		<div id="message"></div>
@@ -223,6 +229,12 @@
 		<div id="caminfo">
 			<span id="camid"></span>
 		</div>
-		<script src="hybrid.js"></script>
+
+
+		<button id="enter">
+			Enter XR
+		</button>
+
+		<script src="splat2.js"></script>
 	</body>
 </html>
