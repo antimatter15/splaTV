@@ -1,13 +1,12 @@
 let refSpace;
 let gl;
 
-let worldTransform = [0.9742308259010315, -0.05595879629254341, 0.21850138902664185, 0, -0.05095028132200241, -0.9982947111129761, -0.028494207188487053, 0, 0.21972326934337616, 0.016627229750156403, -0.9754206538200378, 0, -0.10728270933032036, 1.6374500393867493, 0.33502066135406494, 1];
+let worldTransform = [0.9, -0.05, 0.44, 0, -0.03, -1, -0.06, 0, 0.44, 0.04, -0.9, 0, -0.83, 1.8, -1.72, 1];
 
-
-  const params = new URLSearchParams(location.search);
-  try {
-    worldTransform = JSON.parse(decodeURIComponent(location.hash.slice(1)));
-  } catch (err) {}
+const params = new URLSearchParams(location.search);
+try {
+  worldTransform = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+} catch (err) {}
 
 const vertexShaderSource = `
   #version 300 es
@@ -211,6 +210,13 @@ async function initXR() {
     xrCompatible: true,
   });
 
+  let lastTransformedView;
+  canvas.onclick = () => {
+    if (lastTransformedView) {
+      location.hash = "#" + JSON.stringify(lastTransformedView.map((k) => Math.round(k * 100) / 100));
+    }
+  };
+
   const program = attachShaders(gl, vertexShaderSource, fragmentShaderSource);
 
   gl.disable(gl.DEPTH_TEST); // Disable depth testing
@@ -248,14 +254,6 @@ async function initXR() {
   gl.bindBuffer(gl.ARRAY_BUFFER, indexBuffer);
   gl.vertexAttribIPointer(a_index, 1, gl.INT, false, 0, 0);
   gl.vertexAttribDivisor(a_index, 1);
-
-  //   const vertexData = new Float32Array(vertices.flat());
-  //   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-  //   gl.bufferData(gl.ARRAY_BUFFER, vertexData, gl.STATIC_DRAW);
-
-  //   const vertexPosition = gl.getAttribLocation(program, "vertexPosition");
-  //   gl.enableVertexAttribArray(vertexPosition);
-  //   gl.vertexAttribPointer(vertexPosition, 3, gl.FLOAT, false, 0, 0);
 
   session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
@@ -296,9 +294,7 @@ async function initXR() {
         chunks.push(chunk);
         if (chunk.type === "splat") {
           console.log(vertexCount);
-
           document.getElementById("spinner").style.display = "none";
-
           session.requestAnimationFrame(onXRFrame);
         }
       }
@@ -341,8 +337,9 @@ async function initXR() {
 
       gl.uniform2fv(u_focal, new Float32Array([(projectionMatrix[0] * viewport.width) / 2, -(projectionMatrix[5] * viewport.height) / 2]));
       const transformedView = multiply4(view.transform.inverse.matrix, worldTransform);
-      gl.uniformMatrix4fv(u_view, false, transformedView);
+      lastTransformedView = transformedView;
 
+      gl.uniformMatrix4fv(u_view, false, transformedView);
       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, vertexCount);
 
       const viewProj = multiply4(projectionMatrix, transformedView);
@@ -396,12 +393,6 @@ async function readChunks(reader, chunks, handleChunk) {
   }
   if (chunk) handleChunk(chunk, buffer.buffer, 0, chunks);
 }
-
-document.getElementById("enter").onclick = () => {
-  initXR().catch((err) => {
-    alert(err);
-  });
-};
 
 initXR().catch((err) => {
   document.getElementById("spinner").style.cursor = "pointer";
