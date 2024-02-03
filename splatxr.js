@@ -1,7 +1,7 @@
 let refSpace;
 let gl;
 
-let worldTransform = [0.95, -0.05, 0.32, 0, -0.04, -1, -0.06, 0, 0.32, 0.04, -0.95, 0, -0.04, 1.48, -1.24, 1];
+let worldTransform = [0.99, -0.05, 0.16, 0, -0.05, -1, -0.05, 0, 0.16, 0.04, -0.99, 0, -0.08, 1.63, -0.1, 1];
 
 const params = new URLSearchParams(location.search);
 try {
@@ -256,9 +256,7 @@ async function initXR() {
   gl.vertexAttribDivisor(a_index, 1);
 
   session.updateRenderState({
-    baseLayer: new XRWebGLLayer(session, gl, {
-      framebufferScaleFactor: XRWebGLLayer.getNativeFramebufferScaleFactor(session),
-    }),
+    baseLayer: new XRWebGLLayer(session, gl),
   });
 
   const worker = new Worker(
@@ -327,12 +325,15 @@ async function initXR() {
     let pose = frame.getViewerPose(refSpace);
     if (!pose) return;
     let glLayer = session.renderState.baseLayer;
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     gl.uniform1f(u_time, Math.sin(Date.now() / 1000) / 2 + 1 / 2);
 
     for (let view of pose.views) {
+      // console.log(view);
+      // view.requestViewportScale(0.5);
       let viewport = glLayer.getViewport(view);
       gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
       let projectionMatrix = view.projectionMatrix;
