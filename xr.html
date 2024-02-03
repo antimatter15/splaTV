@@ -185,6 +185,13 @@
 			body.nohf #progress, body.nohf .cube-face {
 				background: #ff9d0d;
 			}
+
+			#enter {
+				width: 100%;
+				height: 100%;
+				position: absolute;
+				font-size: 100px;
+			}
 		</style>
 	</head>
 	<body>
@@ -198,6 +205,7 @@
 		<div id="progress"></div>
 
 		<div id="message"></div>
+        
 		<div class="scene" id="spinner">
 			<div class="cube-wrapper">
 				<div class="cube">
@@ -220,6 +228,8 @@
 		<div id="caminfo">
 			<span id="camid"></span>
 		</div>
+
+		<button style="display:none" id="enter">Enter XR</button>
 		<script src="splatxr.js"></script>
 	</body>
 </html>

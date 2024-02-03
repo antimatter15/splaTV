@@ -394,13 +394,22 @@ async function readChunks(reader, chunks, handleChunk) {
   if (chunk) handleChunk(chunk, buffer.buffer, 0, chunks);
 }
 
+document.getElementById("enter").onclick = () => {
+  console.log("try");
+  initXR().catch((err) => {
+    alert(err);
+  });
+};
+
 initXR().catch((err) => {
-  document.getElementById("spinner").style.cursor = "pointer";
-  document.getElementById("spinner").onclick = () => {
-    initXR().catch((err) => {
-      alert(err);
-    });
-  };
+  document.getElementById("spinner").style.display = "none";
+  document.getElementById("enter").style.display = "";
+  // document.getElementById("spinner").style.cursor = "pointer";
+  // document.getElementById("spinner").onclick = () => {
+  //   initXR().catch((err) => {
+  //     alert(err);
+  //   });
+  // };
 });
 
 function multiply4(a, b) {
