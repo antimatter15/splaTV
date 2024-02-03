@@ -1,7 +1,7 @@
 let refSpace;
 let gl;
 
-let worldTransform = [0.9, -0.05, 0.44, 0, -0.03, -1, -0.06, 0, 0.44, 0.04, -0.9, 0, -0.83, 1.8, -1.72, 1];
+let worldTransform = [0.95, -0.05, 0.32, 0, -0.04, -1, -0.06, 0, 0.32, 0.04, -0.95, 0, -0.04, 1.48, -1.24, 1];
 
 const params = new URLSearchParams(location.search);
 try {
@@ -206,7 +206,7 @@ async function initXR() {
   });
   const canvas = document.getElementById("canvas");
   gl = canvas.getContext("webgl2", {
-    antialias: false,
+    antialias: true,
     xrCompatible: true,
   });
 
@@ -255,7 +255,11 @@ async function initXR() {
   gl.vertexAttribIPointer(a_index, 1, gl.INT, false, 0, 0);
   gl.vertexAttribDivisor(a_index, 1);
 
-  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  session.updateRenderState({
+    baseLayer: new XRWebGLLayer(session, gl, {
+      framebufferScaleFactor: XRWebGLLayer.getNativeFramebufferScaleFactor(session),
+    }),
+  });
 
   const worker = new Worker(
     URL.createObjectURL(
