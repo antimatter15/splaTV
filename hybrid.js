@@ -835,7 +835,7 @@ async function main() {
     worker.postMessage({ view: viewProj });
 
     const currentFps = 1000 / (now - lastFrame) || 0;
-    avgFps = avgFps * 0.9 + currentFps * 0.1;
+    avgFps = (isFinite(avgFps) && avgFps) * 0.9 + currentFps * 0.1;
 
     if (vertexCount > 0) {
       document.getElementById("spinner").style.display = "none";
