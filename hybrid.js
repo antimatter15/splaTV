@@ -152,6 +152,39 @@ function createWorker(self) {
     if (!positions) return;
   }
 
+  var _floatView = new Float32Array(1);
+  var _int32View = new Int32Array(_floatView.buffer);
+
+  function floatToHalf(float) {
+    _floatView[0] = float;
+    var f = _int32View[0];
+    var sign = (f >> 31) & 0x0001;
+    var exp = (f >> 23) & 0x00ff;
+    var frac = f & 0x007fffff;
+    var newExp;
+    if (exp == 0) {
+      newExp = 0;
+    } else if (exp < 113) {
+      newExp = 0;
+      frac |= 0x00800000;
+      frac = frac >> (113 - exp);
+      if (frac & 0x01000000) {
+        newExp = 1;
+        frac = 0;
+      }
+    } else if (exp < 142) {
+      newExp = exp - 112;
+    } else {
+      newExp = 31;
+      frac = 0;
+    }
+    return (sign << 15) | (newExp << 10) | (frac >> 13);
+  }
+
+  function packHalf2x16(x, y) {
+    return (floatToHalf(x) | (floatToHalf(y) << 16)) >>> 0;
+  }
+
   function runSort(viewProj) {
     if (!positions) return;
     // const f_buffer = new Float32Array(buffer);
@@ -208,6 +241,138 @@ function createWorker(self) {
   };
 
   let sortRunning;
+
+  function processPlyBuffer(inputBuffer) {
+    const ubuf = new Uint8Array(inputBuffer);
+    // 10KB ought to be enough for a header...
+    const header = new TextDecoder().decode(ubuf.slice(0, 1024 * 10));
+    const header_end = "end_header\n";
+    const header_end_index = header.indexOf(header_end);
+    if (header_end_index < 0) throw new Error("Unable to read .ply file header");
+    const vertexCount = parseInt(/element vertex (\d+)\n/.exec(header)[1]);
+    console.log("Vertex Count", vertexCount);
+    let row_offset = 0,
+      offsets = {},
+      types = {};
+    const TYPE_MAP = {
+      double: "getFloat64",
+      int: "getInt32",
+      uint: "getUint32",
+      float: "getFloat32",
+      short: "getInt16",
+      ushort: "getUint16",
+      uchar: "getUint8",
+    };
+    for (let prop of header
+      .slice(0, header_end_index)
+      .split("\n")
+      .filter((k) => k.startsWith("property "))) {
+      const [p, type, name] = prop.split(" ");
+      const arrayType = TYPE_MAP[type] || "getInt8";
+      types[name] = arrayType;
+      offsets[name] = row_offset;
+      row_offset += parseInt(arrayType.replace(/[^\d]/g, "")) / 8;
+    }
+
+    console.log("Bytes per row", row_offset, types, offsets);
+
+    let dataView = new DataView(inputBuffer, header_end_index + header_end.length);
+    let row = 0;
+    const attrs = new Proxy(
+      {},
+      {
+        get(target, prop) {
+          if (!types[prop]) throw new Error(prop + " not found");
+          return dataView[types[prop]](row * row_offset + offsets[prop], true);
+        },
+      }
+    );
+
+    console.time("calculate importance");
+    let sizeList = new Float32Array(vertexCount);
+    let sizeIndex = new Uint32Array(vertexCount);
+    for (row = 0; row < vertexCount; row++) {
+      sizeIndex[row] = row;
+      if (!types["scale_0"]) continue;
+      const size = Math.exp(attrs.scale_0) * Math.exp(attrs.scale_1) * Math.exp(attrs.scale_2);
+      const opacity = 1 / (1 + Math.exp(-attrs.opacity));
+      sizeList[row] = size * opacity;
+    }
+    console.timeEnd("calculate importance");
+
+    for (let type in types) {
+      let min = Infinity,
+        max = -Infinity;
+      for (row = 0; row < vertexCount; row++) {
+        sizeIndex[row] = row;
+        min = Math.min(min, attrs[type]);
+        max = Math.max(max, attrs[type]);
+      }
+      console.log(type, min, max);
+    }
+
+    console.time("sort");
+    sizeIndex.sort((b, a) => sizeList[a] - sizeList[b]);
+    console.timeEnd("sort");
+
+    const position_buffer = new Float32Array(3 * vertexCount);
+
+    var texwidth = 1024 * 4; // Set to your desired width
+    var texheight = Math.ceil((4 * vertexCount) / texwidth); // Set to your desired height
+    var texdata = new Uint32Array(texwidth * texheight * 4); // 4 components per pixel (RGBA)
+    var texdata_c = new Uint8Array(texdata.buffer);
+    var texdata_f = new Float32Array(texdata.buffer);
+
+    console.time("build buffer");
+    for (let j = 0; j < vertexCount; j++) {
+      row = sizeIndex[j];
+
+      // x, y, z
+      position_buffer[3 * j + 0] = attrs.x;
+      position_buffer[3 * j + 1] = attrs.y;
+      position_buffer[3 * j + 2] = attrs.z;
+
+      texdata_f[16 * j + 0] = attrs.x;
+      texdata_f[16 * j + 1] = attrs.y;
+      texdata_f[16 * j + 2] = attrs.z;
+
+      // quaternions
+      texdata[16 * j + 3] = packHalf2x16(attrs.rot_0, attrs.rot_1);
+      texdata[16 * j + 4] = packHalf2x16(attrs.rot_2, attrs.rot_3);
+
+      // scale
+      texdata[16 * j + 5] = packHalf2x16(Math.exp(attrs.scale_0), Math.exp(attrs.scale_1));
+      texdata[16 * j + 6] = packHalf2x16(Math.exp(attrs.scale_2), 0);
+
+      // rgb
+      texdata_c[4 * (16 * j + 7) + 0] = Math.max(0, Math.min(255, attrs.f_dc_0 * 255));
+      texdata_c[4 * (16 * j + 7) + 1] = Math.max(0, Math.min(255, attrs.f_dc_1 * 255));
+      texdata_c[4 * (16 * j + 7) + 2] = Math.max(0, Math.min(255, attrs.f_dc_2 * 255));
+
+      // opacity
+      texdata_c[4 * (16 * j + 7) + 3] = (1 / (1 + Math.exp(-attrs.opacity))) * 255;
+
+      // movement over time
+      texdata[16 * j + 8 + 0] = packHalf2x16(attrs.motion_0, attrs.motion_1);
+      texdata[16 * j + 8 + 1] = packHalf2x16(attrs.motion_2, attrs.motion_3);
+      texdata[16 * j + 8 + 2] = packHalf2x16(attrs.motion_4, attrs.motion_5);
+      texdata[16 * j + 8 + 3] = packHalf2x16(attrs.motion_6, attrs.motion_7);
+      texdata[16 * j + 8 + 4] = packHalf2x16(attrs.motion_8, 0);
+
+      // rotation over time
+      texdata[16 * j + 8 + 5] = packHalf2x16(attrs.omega_0, attrs.omega_1);
+      texdata[16 * j + 8 + 6] = packHalf2x16(attrs.omega_2, attrs.omega_3);
+
+      // trbf temporal radial basis function parameters
+      texdata[16 * j + 8 + 7] = packHalf2x16(attrs.trbf_center, Math.exp(attrs.trbf_scale));
+    }
+    console.timeEnd("build buffer");
+
+    console.log("Scene Bytes", texdata.buffer.byteLength);
+
+    self.postMessage({ texdata, texwidth, texheight }, [texdata.buffer]);
+  }
+
   self.onmessage = (e) => {
     if (e.data.texture) {
       let texture = e.data.texture;
@@ -224,6 +389,9 @@ function createWorker(self) {
     } else if (e.data.view) {
       viewProj = e.data.view;
       throttledSort();
+    } else if (e.data.ply) {
+      vertexCount = 0;
+      vertexCount = processPlyBuffer(e.data.ply);
     }
   };
 }
@@ -348,14 +516,6 @@ async function main() {
     viewMatrix = JSON.parse(decodeURIComponent(location.hash.slice(1)));
     carousel = false;
   } catch (err) {}
-  //   const url = "point_cloud.ply";
-  //   const req = await fetch(url, {
-  //     mode: "cors", // no-cors, *cors, same-origin
-  //     credentials: "omit", // include, *same-origin, omit
-  //   });
-  //   console.log(req);
-  //   if (req.status != 200)
-  //     throw new Error(req.status + " Unable to load " + req.url);
 
   const rowLength = 3 * 4 + 3 * 4 + 4 + 4;
   let splatData = new Uint8Array([]);
@@ -454,16 +614,32 @@ async function main() {
   worker.onmessage = (e) => {
     if (e.data.texdata) {
       const { texdata, texwidth, texheight } = e.data;
-      // console.log(texdata)
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
 
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      const json = new TextEncoder().encode(
+        JSON.stringify([
+          {
+            type: "splat",
+            size: texdata.byteLength,
+            texwidth: texwidth,
+            texheight: texheight,
+            cameras: cameras,
+          },
+        ])
+      );
+      const magic = new Uint32Array(2);
+      magic[0] = 0x674b;
+      magic[1] = json.length;
+      const blob = new Blob([magic.buffer, json.buffer, texdata.buffer], {
+        type: "application/octet-stream",
+      });
 
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32UI, texwidth, texheight, 0, gl.RGBA_INTEGER, gl.UNSIGNED_INT, texdata);
+      readChunks(new Response(blob).body.getReader(), [{ size: 8, type: "magic" }], chunkHandler);
+
+      const link = document.createElement("a");
+      link.download = "model.splatv";
+      link.href = URL.createObjectURL(blob);
+      document.body.appendChild(link);
+      link.click();
     } else if (e.data.depthIndex) {
       const { depthIndex, viewProj } = e.data;
       gl.bindBuffer(gl.ARRAY_BUFFER, indexBuffer);
@@ -866,82 +1042,57 @@ async function main() {
 
   frame();
 
-  //   const selectFile = (file) => {
-  //     const fr = new FileReader();
-  //     if (/\.json$/i.test(file.name)) {
-  //       fr.onload = () => {
-  //         cameras = JSON.parse(fr.result);
-  //         viewMatrix = getViewMatrix(cameras[0]);
-  //         projectionMatrix = getProjectionMatrix(camera.fx / downsample, camera.fy / downsample, canvas.width, canvas.height);
-  //         gl.uniformMatrix4fv(u_projection, false, projectionMatrix);
+  const selectFile = (file) => {
+    const fr = new FileReader();
+    if (/\.json$/i.test(file.name)) {
+      fr.onload = () => {
+        cameras = JSON.parse(fr.result);
+        viewMatrix = getViewMatrix(cameras[0]);
+        projectionMatrix = getProjectionMatrix(camera.fx / downsample, camera.fy / downsample, canvas.width, canvas.height);
+        gl.uniformMatrix4fv(u_projection, false, projectionMatrix);
 
-  //         console.log("Loaded Cameras");
-  //       };
-  //       fr.readAsText(file);
-  //     } else {
-  //       stopLoading = true;
-  //       fr.onload = () => {
-  //         splatData = new Uint8Array(fr.result);
-  //         console.log("Loaded", Math.floor(splatData.length / rowLength));
+        console.log("Loaded Cameras");
+      };
+      fr.readAsText(file);
+    } else {
+      stopLoading = true;
+      fr.onload = () => {
+        splatData = new Uint8Array(fr.result);
+        console.log("Loaded", Math.floor(splatData.length / rowLength));
 
-  //         if (splatData[0] == 112 && splatData[1] == 108 && splatData[2] == 121 && splatData[3] == 10) {
-  //           // ply file magic header means it should be handled differently
-  //           worker.postMessage({ ply: splatData.buffer });
-  //         } else {
-  //           worker.postMessage({
-  //             buffer: splatData.buffer,
-  //             vertexCount: Math.floor(splatData.length / rowLength),
-  //           });
-  //         }
-  //       };
-  //       fr.readAsArrayBuffer(file);
-  //     }
-  //   };
+        if (splatData[0] == 112 && splatData[1] == 108 && splatData[2] == 121 && splatData[3] == 10) {
+          // ply file magic header means it should be handled differently
+          worker.postMessage({ ply: splatData.buffer });
+        } else if (splatData[0] == 75 && splatData[1] == 103) {
+          // splatv file
+          readChunks(new Response(splatData).body.getReader(), [{ size: 8, type: "magic" }], chunkHandler);
+        } else {
+          alert("Unsupported file format!");
+        }
+      };
+      fr.readAsArrayBuffer(file);
+    }
+  };
 
-  //   window.addEventListener("hashchange", (e) => {
-  //     try {
-  //       viewMatrix = JSON.parse(decodeURIComponent(location.hash.slice(1)));
-  //       carousel = false;
-  //     } catch (err) {}
-  //   });
+  window.addEventListener("hashchange", (e) => {
+    try {
+      viewMatrix = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+      carousel = false;
+    } catch (err) {}
+  });
 
-  //   const preventDefault = (e) => {
-  //     e.preventDefault();
-  //     e.stopPropagation();
-  //   };
-  //   document.addEventListener("dragenter", preventDefault);
-  //   document.addEventListener("dragover", preventDefault);
-  //   document.addEventListener("dragleave", preventDefault);
-  //   document.addEventListener("drop", (e) => {
-  //     e.preventDefault();
-  //     e.stopPropagation();
-  //     selectFile(e.dataTransfer.files[0]);
-  //   });
-
-  //   let bytesRead = 0;
-  //   let lastVertexCount = -1;
-  //   let stopLoading = false;
-
-  //   while (true) {
-  //     const { done, value } = await reader.read();
-  //     if (done || stopLoading) break;
-
-  //     splatData.set(value, bytesRead);
-  //     bytesRead += value.length;
-
-  //     if (vertexCount > lastVertexCount) {
-  //       worker.postMessage({
-  //         buffer: splatData.buffer,
-  //         vertexCount: Math.floor(bytesRead / rowLength),
-  //       });
-  //       lastVertexCount = vertexCount;
-  //     }
-  //   }
-  //   if (!stopLoading)
-  //     worker.postMessage({
-  //       buffer: splatData.buffer,
-  //       vertexCount: Math.floor(bytesRead / rowLength),
-  //     });
+  const preventDefault = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  document.addEventListener("dragenter", preventDefault);
+  document.addEventListener("dragover", preventDefault);
+  document.addEventListener("dragleave", preventDefault);
+  document.addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    selectFile(e.dataTransfer.files[0]);
+  });
 
   let lastVertexCount = -1;
   const chunkHandler = (chunk, buffer, remaining, chunks) => {
@@ -979,7 +1130,7 @@ async function main() {
     }
   };
 
-  const url = "model.splatv";
+  const url = params.get("url") ? new URL(params.get("url"), "https://huggingface.co/cakewalk/splat-data/resolve/main/") : "model.splatv";
   const req = await fetch(url, { mode: "cors", credentials: "omit" });
   if (req.status != 200) throw new Error(req.status + " Unable to load " + req.url);
 
