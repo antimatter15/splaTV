@@ -1065,7 +1065,11 @@ async function main() {
           worker.postMessage({ ply: splatData.buffer });
         } else if (splatData[0] == 75 && splatData[1] == 103) {
           // splatv file
-          readChunks(new Response(splatData).body.getReader(), [{ size: 8, type: "magic" }], chunkHandler);
+          readChunks(new Response(splatData).body.getReader(), [{ size: 8, type: "magic" }], chunkHandler).then(() => {
+            currentCameraIndex = 0;
+            camera = cameras[currentCameraIndex];
+            viewMatrix = getViewMatrix(camera);
+          });
         } else {
           alert("Unsupported file format!");
         }
