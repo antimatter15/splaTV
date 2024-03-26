@@ -332,8 +332,6 @@ async function initXR() {
     gl.uniform1f(u_time, Math.sin(Date.now() / 1000) / 2 + 1 / 2);
 
     for (let view of pose.views) {
-      // console.log(view);
-      // view.requestViewportScale(0.5);
       let viewport = glLayer.getViewport(view);
       gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
       let projectionMatrix = view.projectionMatrix;
@@ -409,12 +407,6 @@ document.getElementById("enter").onclick = () => {
 initXR().catch((err) => {
   document.getElementById("spinner").style.display = "none";
   document.getElementById("enter").style.display = "";
-  // document.getElementById("spinner").style.cursor = "pointer";
-  // document.getElementById("spinner").onclick = () => {
-  //   initXR().catch((err) => {
-  //     alert(err);
-  //   });
-  // };
 });
 
 function multiply4(a, b) {
